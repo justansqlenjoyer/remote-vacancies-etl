@@ -78,7 +78,7 @@ def load_to_db(df):
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS remote_vacancies CASCADE;"))
 
-    df.to_sql("remote_vacancies", con=engine, if_exists="replace", index=False)
+    df.to_sql("remote_vacancies", con=engine, if_exists="append", index=False)
     logging.info(f"Загружено {len(df)} строк в таблицу 'remote_vacancies'")
     
     with engine.begin() as conn:
