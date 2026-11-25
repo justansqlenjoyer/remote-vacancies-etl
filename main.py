@@ -57,8 +57,8 @@ def transform_vacancies(raw_vacancies, rates):
     keywords = ("data", "python", "sql", "engineer", "analyst")
     df = df[df["position"].str.lower().str.contains("|".join(keywords), na=False)]
 
-    df["salary_min"] = df["salary_min"].replace(0, nan)
-    df["salary_max"] = df["salary_max"].replace(0, nan)
+    df["salary_min"] = pd.to_numeric(df["salary_min"]).replace(0, nan)
+    df["salary_max"] = pd.to_numeric(df["salary_max"]).replace(0, nan)
 
     df["salary_avg_usd"] = ((df["salary_min"] + df["salary_max"]) / 2).round(2)
     df["salary_avg_byn"] = (df["salary_avg_usd"] * rates["USD"]).round(2)
@@ -76,12 +76,21 @@ def transform_vacancies(raw_vacancies, rates):
 def load_to_db(df):
     engine = create_engine(os.getenv("DB_URL"))
     with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS remote_vacancies CASCADE;"))
-
-    df.to_sql("remote_vacancies", con=engine, if_exists="append", index=False)
-    logging.info(f"Загружено {len(df)} строк в таблицу 'remote_vacancies'")
-    
-    with engine.begin() as conn:
+        conn.execute(text(
+        """
+        CREATE TABLE IF NOT EXISTS remote_vacancies (
+        id INTEGER PRIMARY KEY,
+        position TEXT,
+        company TEXT,
+        tags TEXT,
+        salary_avg_byn NUMERIC(12, 2),
+        published_at DATE
+        );
+        """))
+        conn.execute(text(
+        """
+        TRUNCATE TABLE remote_vacancies;
+        """))
         conn.execute(text(
         """
         CREATE OR REPLACE VIEW company_stats_v AS 
@@ -108,9 +117,15 @@ def load_to_db(df):
         GROUP BY tech_stack
         ORDER BY vacancies_count DESC;
         """))
+    df.to_sql("remote_vacancies", con=engine, if_exists="append", index=False)
+    logging.info(f"Загружено {len(df)} строк в таблицу 'remote_vacancies'")
 
 if __name__ == "__main__":
-    raw_vacancies = extract_vacancies()
-    rates = extract_rates()
-    clean_df = transform_vacancies(raw_vacancies, rates)
-    load_to_db(clean_df)
+    try:
+        raw_vacancies = extract_vacancies()
+        rates = extract_rates()
+        clean_df = transform_vacancies(raw_vacancies, rates)
+        load_to_db(clean_df)
+    except Exception as e:
+        logging.error(f"Пайплайн упал: {e}")
+        raise
