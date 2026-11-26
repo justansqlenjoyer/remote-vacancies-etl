@@ -74,51 +74,56 @@ def transform_vacancies(raw_vacancies, rates):
 
 
 def load_to_db(df):
+    if len(df) < 15:
+        raise ValueError(f"Подозрительно мало вакансий: {len(df)} (порог 15)")
     engine = create_engine(os.getenv("DB_URL"))
-    with engine.begin() as conn:
-        conn.execute(text(
-        """
-        CREATE TABLE IF NOT EXISTS remote_vacancies (
-        id INTEGER PRIMARY KEY,
-        position TEXT,
-        company TEXT,
-        tags TEXT,
-        salary_avg_byn NUMERIC(12, 2),
-        published_at DATE
-        );
-        """))
-        conn.execute(text(
-        """
-        TRUNCATE TABLE remote_vacancies;
-        """))
-        conn.execute(text(
-        """
-        CREATE OR REPLACE VIEW company_stats_v AS 
-        SELECT company, COUNT(*) AS vacancies_count,
-        ROUND(CAST(AVG(salary_avg_byn) AS numeric), 2) AS company_avg_salary
-        FROM remote_vacancies
-        GROUP BY company
-        ORDER BY vacancies_count DESC;
-        """))
-        conn.execute(text(
-        """
-        CREATE OR REPLACE VIEW stack_demand_v AS
-        SELECT
-            CASE
-                WHEN LOWER(tags) LIKE '%python%' THEN 'Python'
-                WHEN LOWER(tags) LIKE '%sql%' THEN 'SQL'
-                WHEN LOWER(tags) LIKE '%devops%' THEN 'DevOps'
-                WHEN LOWER(tags) LIKE '%ai%' OR LOWER(tags) LIKE '%ml%' THEN 'AI / ML'
-                ELSE 'Other IT'
-            END AS tech_stack,
-            COUNT(*) AS vacancies_count,
-            ROUND(CAST(AVG(salary_avg_byn) AS numeric), 2) AS stack_avg_salary
-        FROM remote_vacancies
-        GROUP BY tech_stack
-        ORDER BY vacancies_count DESC;
-        """))
-    df.to_sql("remote_vacancies", con=engine, if_exists="append", index=False)
-    logging.info(f"Загружено {len(df)} строк в таблицу 'remote_vacancies'")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS remote_vacancies (
+            id INTEGER PRIMARY KEY,
+            position TEXT,
+            company TEXT,
+            tags TEXT,
+            salary_avg_byn NUMERIC(12, 2),
+            published_at DATE
+            );
+            """))
+            conn.execute(text(
+            """
+            TRUNCATE TABLE remote_vacancies;
+            """))
+            df.to_sql("remote_vacancies", con=conn, if_exists="append", index=False)
+            conn.execute(text(
+            """
+            CREATE OR REPLACE VIEW company_stats_v AS 
+            SELECT company, COUNT(*) AS vacancies_count,
+            ROUND(CAST(AVG(salary_avg_byn) AS numeric), 2) AS company_avg_salary
+            FROM remote_vacancies
+            GROUP BY company
+            ORDER BY vacancies_count DESC;
+            """))
+            conn.execute(text(
+            """
+            CREATE OR REPLACE VIEW stack_demand_v AS
+            SELECT
+                CASE
+                    WHEN LOWER(tags) LIKE '%python%' THEN 'Python'
+                    WHEN LOWER(tags) LIKE '%sql%' THEN 'SQL'
+                    WHEN LOWER(tags) LIKE '%devops%' THEN 'DevOps'
+                    WHEN LOWER(tags) LIKE '%ai%' OR LOWER(tags) LIKE '%ml%' THEN 'AI / ML'
+                    ELSE 'Other IT'
+                END AS tech_stack,
+                COUNT(*) AS vacancies_count,
+                ROUND(CAST(AVG(salary_avg_byn) AS numeric), 2) AS stack_avg_salary
+            FROM remote_vacancies
+            GROUP BY tech_stack
+            ORDER BY vacancies_count DESC;
+            """))
+        logging.info(f"Загружено {len(df)} строк в таблицу 'remote_vacancies'")
+    finally:
+        engine.dispose()
 
 if __name__ == "__main__":
     try:
@@ -127,5 +132,5 @@ if __name__ == "__main__":
         clean_df = transform_vacancies(raw_vacancies, rates)
         load_to_db(clean_df)
     except Exception as e:
-        logging.error(f"Пайплайн упал: {e}")
+        logging.error(f"Пайплайн упал: {e}", exc_info=True)
         raise
